@@ -1,242 +1,386 @@
-import streamlit as st
-import google.generativeai as genai
-import json
-import re
-import requests
-import random
-import urllib.parse
+import React, { useState, useEffect } from 'react';
+import { Search, Globe, Target, Image as ImageIcon, TrendingUp, DollarSign, Loader2, AlertTriangle, Heart, MessageCircle, Activity, ExternalLink, ShoppingBag, ArrowRight, SlidersHorizontal } from 'lucide-react';
 
-# --- إعدادات الصفحة ---
-st.set_page_config(page_title="ALI Spy Pro - Product Radar", layout="wide", page_icon="🕵️‍♂️")
+// يتم توفير مفتاح Gemini تلقائياً من بيئة التشغيل
+const apiKey = ""; 
 
-# --- التصميم العبقري (Premium UI/UX CSS) ---
-st.markdown("""
-<style>
-    @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;900&display=swap');
-    
-    html, body, [data-testid="stAppViewContainer"], [data-testid="stSidebar"] { 
-        font-family: 'Cairo', sans-serif !important; direction: rtl; text-align: right; background-color: #f8fafc;
+// دالة جلب الصور (Pexels أو الذكاء الاصطناعي)
+const fetchImage = async (keyword, pexelsKey) => {
+  if (pexelsKey && pexelsKey.trim() !== "") {
+    try {
+      const res = await fetch(`https://api.pexels.com/v1/search?query=${encodeURIComponent(keyword)}&per_page=1&orientation=landscape`, {
+        headers: { Authorization: pexelsKey }
+      });
+      const data = await res.json();
+      if (data.photos && data.photos.length > 0) {
+        return data.photos[0].src.large;
+      }
+    } catch (e) {
+      console.error("فشل جلب الصورة من Pexels، سيتم استخدام البديل", e);
     }
-    
-    ::-webkit-scrollbar { width: 8px; height: 8px; }
-    ::-webkit-scrollbar-track { background: #f1f5f9; }
-    ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
-    
-    .main-header { 
-        background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
-        color: white; padding: 40px 20px; border-radius: 20px; text-align: center; margin-bottom: 35px; 
-        box-shadow: 0 20px 40px -10px rgba(15, 23, 42, 0.3); border-bottom: 5px solid #ef4444; position: relative; overflow: hidden;
-    }
-    .main-header h1 {
-        font-weight: 900; font-size: 3rem; margin-bottom: 5px;
-        background: linear-gradient(to right, #fca5a5, #ffffff); -webkit-background-clip: text; -webkit-text-fill-color: transparent; position: relative; z-index: 1;
-    }
-    .main-header p { color: #94a3b8; font-size: 1.2rem; font-weight: 600; position: relative; z-index: 1; }
+  }
+  // البديل: صورة ذكاء اصطناعي واقعية
+  const prompt = `professional ecommerce product photography of ${keyword}, white background, studio lighting, high quality`;
+  return `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=600&height=400&nologo=true&seed=${Math.floor(Math.random() * 100000)}`;
+};
 
-    .stButton > button {
-        background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%) !important; color: white !important; font-weight: 800 !important;
-        font-size: 1.1rem !important; border: none !important; border-radius: 12px !important; padding: 15px 30px !important;
-        transition: all 0.3s ease !important; box-shadow: 0 4px 6px -1px rgba(239, 68, 68, 0.3) !important; width: 100%;
-    }
-    .stButton > button:hover { transform: translateY(-3px) scale(1.01) !important; box-shadow: 0 15px 25px -5px rgba(239, 68, 68, 0.4) !important; }
+// مكون بطاقة المنتج
+const ProductCard = ({ product, pexelsKey }) => {
+  const [imgUrl, setImgUrl] = useState("");
 
-    /* بطاقات التجسس (Spy Cards) */
-    .spy-card {
-        background: white; border-radius: 16px; padding: 20px; border: 1px solid #e2e8f0;
-        box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.05); transition: transform 0.3s ease; height: 100%; display: flex; flex-direction: column;
-    }
-    .spy-card:hover { transform: translateY(-5px); border-color: #ef4444; box-shadow: 0 20px 25px -5px rgba(239, 68, 68, 0.15); }
-    .spy-badge { background: #fee2e2; color: #ef4444; padding: 5px 15px; border-radius: 20px; font-size: 0.85rem; font-weight: 900; display: inline-block; margin-bottom: 15px; }
-    .spy-price { font-size: 1.8rem; font-weight: 900; color: #10b981; }
-    .spy-cost { font-size: 1.1rem; font-weight: bold; color: #94a3b8; text-decoration: line-through; margin-right: 10px; }
-    .spy-img-container { width: 100%; height: 220px; border-radius: 12px; overflow: hidden; margin-bottom: 15px; background: #f1f5f9;}
-    .spy-img { width: 100%; height: 100%; object-fit: cover; }
-    
-    .stTextInput input, .stSelectbox > div > div {
-        border-radius: 10px !important; border: 1px solid #cbd5e1 !important; transition: border-color 0.3s !important;
-    }
-    .stTextInput input:focus { border-color: #ef4444 !important; box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.2) !important; }
-</style>
-""", unsafe_allow_html=True)
+  useEffect(() => {
+    const getImg = async () => {
+      const url = await fetchImage(product.image_keyword || product.product_name, pexelsKey);
+      setImgUrl(url);
+    };
+    getImg();
+  }, [product, pexelsKey]);
 
-st.markdown('<div class="main-header"><h1>🕵️‍♂️ ALI Spy Pro</h1><p>رادار المنتجات الرابحة | تجسس وتحليل للسوق العربي (COD)</p></div>', unsafe_allow_html=True)
+  const getSaturationColor = (level) => {
+    if (level.includes("منخفض") || level.includes("Low")) return "bg-emerald-100 text-emerald-700 border-emerald-200";
+    if (level.includes("متوسط") || level.includes("Medium")) return "bg-amber-100 text-amber-700 border-amber-200";
+    return "bg-red-100 text-red-700 border-red-200";
+  };
 
-# ==========================================================
-# 🧠 دوال أساسية (توليد، تنظيف، جلب الصور)
-# ==========================================================
-def get_fast_working_model(api_key):
-    if 'valid_model_name' in st.session_state:
-        return st.session_state.valid_model_name
-    genai.configure(api_key=api_key, transport="rest")
-    try:
-        for m in genai.list_models():
-            if 'generateContent' in m.supported_generation_methods and 'flash' in m.name.lower():
-                st.session_state.valid_model_name = m.name
-                return m.name
-    except: pass
-    st.session_state.valid_model_name = "gemini-pro"
-    return "gemini-pro"
-
-def get_real_or_ai_image(keyword, pexels_key, width, height, orientation="landscape"):
-    safe_keyword = str(keyword).strip()
-    if not safe_keyword or safe_keyword.lower() == "none": safe_keyword = "ecommerce product"
-    
-    # 1. جلب صورة حقيقية من Pexels إذا توفر المفتاح
-    if pexels_key:
-        try:
-            url = f"https://api.pexels.com/v1/search?query={urllib.parse.quote(safe_keyword)}&per_page=5&orientation={orientation}"
-            headers = {"Authorization": pexels_key}
-            response = requests.get(url, headers=headers, timeout=5)
-            if response.status_code == 200:
-                data = response.json()
-                if data.get("photos") and len(data["photos"]) > 0:
-                    return random.choice(data["photos"])["src"]["large"]
-        except: pass
+  return (
+    <div className="bg-white rounded-2xl border border-slate-200 shadow-lg hover:-translate-y-2 hover:shadow-2xl transition-all duration-300 flex flex-col h-full overflow-hidden group">
+      
+      <div className="w-full h-56 bg-slate-100 overflow-hidden relative">
+        {imgUrl ? (
+          <img src={imgUrl} alt={product.product_name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" loading="lazy" />
+        ) : (
+          <div className="w-full h-full flex items-center justify-center text-slate-400">
+            <Loader2 className="w-8 h-8 animate-spin" />
+          </div>
+        )}
+        <div className="absolute top-3 right-3 bg-slate-900/80 backdrop-blur-sm text-white px-3 py-1 rounded-full text-xs font-black shadow-sm">
+          {product.category}
+        </div>
+        <div className={`absolute top-3 left-3 px-3 py-1 rounded-full text-xs font-black shadow-sm border ${getSaturationColor(product.saturation)}`}>
+          التشبع: {product.saturation}
+        </div>
+      </div>
+      
+      <div className="p-5 flex flex-col flex-grow">
+        <h3 className="font-black text-xl text-slate-800 mb-4 leading-tight">{product.product_name}</h3>
         
-    # 2. الخيار البديل: صورة ذكاء اصطناعي بنمط واقعي
-    prompt = f"professional ecommerce product photography of {safe_keyword}, white background, studio lighting, highly detailed 8k"
-    seed = random.randint(1, 100000)
-    return f"https://image.pollinations.ai/prompt/{urllib.parse.quote(prompt)}?width={width}&height={height}&nologo=true&seed={seed}"
+        <div className="flex items-center justify-center gap-4 mb-4 bg-slate-50 p-3 rounded-xl border border-slate-100">
+          <div className="flex items-center gap-1.5 text-slate-700 font-bold text-sm">
+            <Heart className="w-4 h-4 text-red-500 fill-red-500" />
+            {product.engagement_likes}
+          </div>
+          <div className="w-px h-4 bg-slate-300"></div>
+          <div className="flex items-center gap-1.5 text-slate-700 font-bold text-sm">
+            <MessageCircle className="w-4 h-4 text-blue-500 fill-blue-500" />
+            {product.engagement_comments}
+          </div>
+          <div className="w-px h-4 bg-slate-300"></div>
+          <div className="flex items-center gap-1.5 text-emerald-600 font-black text-sm">
+            <Activity className="w-4 h-4" />
+            Trend
+          </div>
+        </div>
 
-def extract_json(text):
-    tb = chr(96) * 3 
-    clean_text = re.sub(f'{tb}(?:json|JSON)?', '', text, flags=re.IGNORECASE)
-    clean_text = clean_text.replace(tb, '').strip()
-    match = re.search(r'\[.*\]', clean_text, re.DOTALL) # نبحث عن مصفوفة Array
-    if match: return match.group(0)
-    match_obj = re.search(r'\{.*\}', clean_text, re.DOTALL)
-    if match_obj: return f"[{match_obj.group(0)}]" # تغليف إذا أرجع عنصر واحد
-    return clean_text
+        <div className="grid grid-cols-3 gap-2 mb-5">
+          <div className="bg-slate-50 p-2 rounded-lg text-center border border-slate-100">
+            <div className="text-[10px] text-slate-500 font-bold mb-1">سعر المورد</div>
+            <div className="text-slate-800 font-black text-sm">${product.cost_price}</div>
+          </div>
+          <div className="bg-emerald-50 p-2 rounded-lg text-center border border-emerald-100">
+            <div className="text-[10px] text-emerald-600 font-bold mb-1">سعر البيع</div>
+            <div className="text-emerald-700 font-black text-sm">${product.selling_price}</div>
+          </div>
+          <div className="bg-blue-50 p-2 rounded-lg text-center border border-blue-100">
+            <div className="text-[10px] text-blue-600 font-bold mb-1">هامش الربح</div>
+            <div className="text-blue-700 font-black text-sm">${product.profit_margin}</div>
+          </div>
+        </div>
+        
+        <div className="text-sm text-slate-600 mb-4">
+          <strong className="text-slate-800">💡 لماذا ينجح؟</strong> {product.why_winning}
+        </div>
+        
+        <div className="mt-auto grid grid-cols-2 gap-2 pt-4 border-t border-slate-100">
+          <a 
+            href={`https://www.facebook.com/ads/library/?active_status=all&ad_type=all&country=ALL&q=${encodeURIComponent(product.fb_search_query)}`}
+            target="_blank" 
+            rel="noopener noreferrer"
+            className="flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white py-2.5 rounded-xl text-xs font-bold transition-colors"
+          >
+            <Search className="w-3.5 h-3.5" />
+            إعلانات فيسبوك
+          </a>
+          <a 
+            href={`https://www.aliexpress.com/wholesale?SearchText=${encodeURIComponent(product.aliexpress_query)}`}
+            target="_blank" 
+            rel="noopener noreferrer"
+            className="flex items-center justify-center gap-2 bg-orange-500 hover:bg-orange-600 text-white py-2.5 rounded-xl text-xs font-bold transition-colors"
+          >
+            <ShoppingBag className="w-3.5 h-3.5" />
+            علي إكسبريس
+          </a>
+        </div>
+      </div>
+    </div>
+  );
+};
 
-# ==========================================================
-# 🕵️‍♂️ دالة رادار المنتجات (Spy Tool AI)
-# ==========================================================
-def generate_spy_products(api_key, market, niche):
-    genai.configure(api_key=api_key, transport="rest")
-    model_name = get_fast_working_model(api_key)
-    model = genai.GenerativeModel(model_name)
-    
-    prompt = f"""
-    أنت خوارزمية ذكية متخصصة في تحليل التجارة الإلكترونية (Drop-shipping & COD) تعمل كأداة تجسس قوية (مثل Minea أو SellTheTrend).
-    قم بتحليل السوق الحالي في "{market}" وتحديداً في مجال "{niche}".
-    
-    استخرج 3 إلى 5 منتجات "فعلية ومحددة جداً" (وليس تصنيفات عامة مثل "ساعة ذكية" بل منتج مخصص مثل "ساعة ذكية لقياس ضغط الدم لكبار السن") تعتبر حالياً منتجات رابحة (Winning Products) وتحقق مبيعات ضخمة بنظام الدفع عند الاستلام (COD) في هذا البلد.
+export default function App() {
+  const [market, setMarket] = useState("المملكة العربية السعودية (KSA)");
+  const [niche, setNiche] = useState("منتجات حل المشاكل اليومية");
+  const [productCount, setProductCount] = useState(4); // المتغير الجديد لعدد المنتجات
+  const [pexelsKey, setPexelsKey] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [results, setResults] = useState([]);
+  const [error, setError] = useState("");
 
-    رد بصيغة JSON Array بهذا الهيكل الدقيق حصراً:
-    [
-        {{
-            "product_name": "اسم المنتج الدقيق بالعربية",
-            "category": "Gadgets أو Cosmetics",
-            "image_keyword": "1 to 3 english words describing the product strictly for image search",
-            "why_winning": "سبب مقنع جداً لنجاحه في هذا البلد بالتحديد (سطر واحد)",
-            "target_audience": "الجمهور المستهدف بدقة",
-            "cost_price": 5, 
-            "selling_price": 35
-        }}
-    ]
-    لا تكتب أي نص أو شرح خارج مصفوفة الـ JSON.
-    """
-    response = model.generate_content(prompt, request_options={"timeout": 60.0})
-    return extract_json(response.text)
+  const markets = ["المملكة العربية السعودية (KSA)", "الإمارات العربية المتحدة (UAE)", "المغرب (Morocco)", "سلطنة عمان (Oman)", "الكويت (Kuwait)", "مصر (Egypt)", "الخليج العربي عموماً"];
+  const niches = ["منتجات حل المشاكل اليومية", "مستحضرات التجميل والعناية بالبشرة", "أدوات المطبخ والمنزل الذكية", "اكسسوارات وعناية السيارات", "منتجات الصحة والراحة", "منتجات الأطفال والألعاب الذكية"];
 
-# ==========================================================
-# 🎛️ واجهة المستخدم
-# ==========================================================
+  const scanMarket = async () => {
+    setLoading(true);
+    setError("");
+    setResults([]);
 
-with st.sidebar:
-    st.header("⚙️ إعدادات الرادار")
-    api_key = st.text_input("🔑 Gemini API Key", type="password", help="مطلوب لتشغيل خوارزمية التجسس وتحليل السوق")
-    pexels_key = st.text_input("📸 Pexels API Key (اختياري)", type="password", help="لجلب صور فوتوغرافية حقيقية للمنتجات بدلاً من الذكاء الاصطناعي")
-    st.markdown("---")
-    st.info("💡 **كيف تعمل الأداة؟**\nتقوم الأداة باستخدام الذكاء الاصطناعي للبحث في التريندات الحالية، الثقافة الشرائية للبلد المختار، واحتياجات السوق لاستخراج منتجات ذات احتمالية عالية جداً للنجاح في نظام الـ COD.")
+    const keyToUse = apiKey || ""; 
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${keyToUse}`;
 
-st.markdown("### 📡 توجيه الرادار (تحديد الهدف)")
-col1, col2 = st.columns(2)
+    // دمج المتغير الجديد (productCount) داخل البرومت
+    const promptText = `أنت خوارزمية ذكية متخصصة في تحليل التجارة الإلكترونية وتعمل كأداة تجسس (Spy Tool) مشابهة لـ SellTheTrend.
+قم بتحليل السوق في "${market}" وتحديداً في نيتش "${niche}".
+استخرج ${productCount} منتجات فعلية، محددة جداً، ورابحة (Winning Products) حالياً في هذا السوق بنظام الدفع عند الاستلام (COD).
 
-with col1: 
-    target_market = st.selectbox("🌍 السوق المستهدف (البلد):", [
-        "المملكة العربية السعودية (KSA)", 
-        "الإمارات العربية المتحدة (UAE)", 
-        "المغرب (Morocco)", 
-        "سلطنة عمان (Oman)",
-        "الكويت (Kuwait)",
-        "مصر (Egypt)",
-        "الخليج العربي عموماً"
-    ])
-    
-with col2: 
-    target_niche = st.selectbox("🎯 النيتش (المجال):", [
-        "منتجات حل المشاكل اليومية (Problem Solving Gadgets)", 
-        "مستحضرات التجميل والعناية بالبشرة والشعر", 
-        "أدوات المطبخ والمنزل الذكية", 
-        "اكسسوارات وعناية السيارات", 
-        "منتجات الصحة والراحة (آلام الظهر، المفاصل..)",
-        "منتجات الأطفال والألعاب الذكية"
-    ])
+يجب أن تقوم بمحاكاة وتقدير الأرقام بذكاء كما تفعل أدوات التجسس الكبرى.
 
-st.markdown("---")
-spy_btn = st.button("📡 مسح السوق الآن (البحث عن منتجات رابحة)", use_container_width=True)
+تأكد من الرد بصيغة JSON Array فقط، وتأكد من ملء جميع الحقول التالية لكل منتج:
+- product_name: اسم المنتج
+- category: الفئة
+- image_keyword: كلمات انجليزية بسيطة للبحث عن الصورة
+- why_winning: سبب النجاح
+- target_audience: الجمهور
+- cost_price: تكلفة الشراء (رقم)
+- selling_price: سعر البيع (رقم)
+- profit_margin: هامش الربح (رقم)
+- saturation: درجة تشبع السوق (منخفض، متوسط، عالي)
+- engagement_likes: عدد الإعجابات التقريبي للإعلانات (مثال: 15K, 2.5K)
+- engagement_comments: عدد التعليقات (مثال: 1.2K, 500)
+- fb_search_query: كلمة مفتاحية دقيقة بالإنجليزية للبحث عنها في مكتبة إعلانات فيسبوك (Facebook Ad Library)
+- aliexpress_query: كلمة مفتاحية دقيقة بالإنجليزية للبحث عنها في علي إكسبريس`;
 
-if spy_btn:
-    if not api_key:
-        st.error("⚠️ يرجى إدخال مفتاح Gemini API في القائمة الجانبية أولاً.")
-    else:
-        with st.spinner(f"🤖 جاري زحف وتحليل بيانات المستهلكين في {target_market}... (قد يستغرق 30 ثانية)"):
-            try:
-                raw_json = generate_spy_products(api_key, target_market, target_niche)
-                products_list = json.loads(raw_json)
-                st.session_state['spy_results'] = products_list
-                st.success("✅ اكتمل المسح! إليك المنتجات التي تتصدر التريند حالياً.")
-            except Exception as e:
-                st.error(f"🛑 حدث خطأ أثناء تحليل السوق: تأكد من صحة الـ API Key أو حاول مرة أخرى.")
-                st.write(f"تفاصيل الخطأ التقني: {str(e)}")
+    const payload = {
+      contents: [{ parts: [{ text: promptText }] }],
+      systemInstruction: { parts: [{ text: "رد فقط بمصفوفة JSON (Array). لا تكتب أي نصوص أخرى خارج المصفوفة." }] },
+      generationConfig: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: "ARRAY",
+          items: {
+            type: "OBJECT",
+            properties: {
+              product_name: { type: "STRING" },
+              category: { type: "STRING" },
+              image_keyword: { type: "STRING" },
+              why_winning: { type: "STRING" },
+              target_audience: { type: "STRING" },
+              cost_price: { type: "NUMBER" },
+              selling_price: { type: "NUMBER" },
+              profit_margin: { type: "NUMBER" },
+              saturation: { type: "STRING" },
+              engagement_likes: { type: "STRING" },
+              engagement_comments: { type: "STRING" },
+              fb_search_query: { type: "STRING" },
+              aliexpress_query: { type: "STRING" }
+            },
+            required: ["product_name", "category", "image_keyword", "why_winning", "target_audience", "cost_price", "selling_price", "profit_margin", "saturation", "engagement_likes", "engagement_comments", "fb_search_query", "aliexpress_query"]
+          }
+        }
+      }
+    };
 
-# ==========================================================
-# 📊 عرض النتائج (Spy Cards)
-# ==========================================================
-if 'spy_results' in st.session_state and isinstance(st.session_state['spy_results'], list):
-    st.markdown("<br>", unsafe_allow_html=True)
-    st.markdown("### 🔥 المنتجات الرابحة (Winning Products)")
-    
-    # تنسيق العرض في أعمدة بناءً على عدد المنتجات المستخرجة
-    num_products = len(st.session_state['spy_results'])
-    cols = st.columns(min(num_products, 3)) # عرض 3 منتجات في الصف كحد أقصى
-    
-    for i, prod in enumerate(st.session_state['spy_results']):
-        col_index = i % 3
-        with cols[col_index]:
-            st.markdown('<div class="spy-card">', unsafe_allow_html=True)
-            
-            # جلب الصورة
-            keyword = prod.get('image_keyword', prod.get('product_name', 'product'))
-            img_url = get_real_or_ai_image(keyword, pexels_key, 400, 300)
-            
-            st.markdown(f'''
-            <div class="spy-img-container">
-                <img src="{img_url}" class="spy-img" alt="{prod.get('product_name', 'Product')}" loading="lazy">
+    let attempt = 0;
+    const delays = [1000, 2000, 4000, 8000, 16000];
+    let success = false;
+
+    while (attempt < 5 && !success) {
+      try {
+        const res = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+
+        if (!res.ok) throw new Error(`خطأ في السيرفر: ${res.status}`);
+        
+        const data = await res.json();
+        const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+        
+        if (!text) throw new Error("لم يتم استلام بيانات من الذكاء الاصطناعي");
+        
+        const parsedData = JSON.parse(text);
+        setResults(parsedData);
+        success = true;
+      } catch (err) {
+        console.error(`محاولة ${attempt + 1} فشلت:`, err);
+        if (attempt === 4) {
+          setError("عذراً، السيرفر عليه ضغط كبير حالياً. يرجى المحاولة مرة أخرى.");
+        } else {
+          await new Promise(resolve => setTimeout(resolve, delays[attempt]));
+        }
+        attempt++;
+      }
+    }
+    setLoading(false);
+  };
+
+  return (
+    <div dir="rtl" className="min-h-screen bg-slate-50 font-sans text-right pb-20">
+      {/* Header */}
+      <div className="bg-[#0f172a] text-white py-12 px-6 border-b border-slate-800 relative overflow-hidden">
+        <div className="absolute top-0 left-0 w-full h-full opacity-5 pointer-events-none" style={{ backgroundImage: 'radial-gradient(circle at 2px 2px, white 1px, transparent 0)', backgroundSize: '32px 32px' }}></div>
+        <div className="max-w-7xl mx-auto relative z-10 flex flex-col md:flex-row items-center justify-between gap-6">
+          <div>
+            <h1 className="text-4xl md:text-5xl font-black mb-3 tracking-tight flex items-center gap-3">
+              <TrendingUp className="w-10 h-10 text-emerald-400" />
+              ALI Spy Pro <span className="text-sm bg-emerald-500/20 text-emerald-400 px-3 py-1 rounded-full border border-emerald-500/30">V2.5</span>
+            </h1>
+            <p className="text-slate-400 text-lg font-medium max-w-2xl">
+              لوحة تحكم استخباراتية متقدمة بديلة لـ SellTheTrend. حلل السوق، اكتشف المنتجات، وتجسس على المنافسين.
+            </p>
+          </div>
+          <div className="flex gap-4">
+            <div className="bg-slate-800/50 p-4 rounded-xl border border-slate-700 text-center">
+              <div className="text-slate-400 text-xs font-bold mb-1">الأسواق المدعومة</div>
+              <div className="text-xl font-black text-white">الوطن العربي</div>
             </div>
-            ''', unsafe_allow_html=True)
-            
-            st.markdown(f"<span class='spy-badge'>{prod.get('category', 'Gadgets')}</span>", unsafe_allow_html=True)
-            st.markdown(f"<h3 style='font-weight:900; color:#0f172a; margin-top:0;'>{prod.get('product_name', 'بدون اسم')}</h3>", unsafe_allow_html=True)
-            
-            st.markdown("---")
-            st.markdown(f"**🎯 الجمهور المستهدف:**<br><span style='color:#475569;'>{prod.get('target_audience', '')}</span>", unsafe_allow_html=True)
-            st.markdown(f"**💡 سر النجاح في السوق:**<br><span style='color:#475569;'>{prod.get('why_winning', '')}</span>", unsafe_allow_html=True)
-            st.markdown("---")
-            
-            st.markdown(f'''
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-top:auto; padding-top:15px;">
-                <div>
-                    <div style="font-size:0.9rem; color:#64748b; font-weight:bold;">تكلفة المورد</div>
-                    <div class="spy-cost">${prod.get('cost_price', '0')}</div>
-                </div>
-                <div style="text-align:left;">
-                    <div style="font-size:0.9rem; color:#64748b; font-weight:bold;">سعر البيع (COD)</div>
-                    <div class="spy-price">${prod.get('selling_price', '0')}</div>
-                </div>
+            <div className="bg-slate-800/50 p-4 rounded-xl border border-slate-700 text-center">
+              <div className="text-slate-400 text-xs font-bold mb-1">تحديث البيانات</div>
+              <div className="text-xl font-black text-emerald-400 flex items-center justify-center gap-1"><Activity className="w-4 h-4"/> Live</div>
             </div>
-            ''', unsafe_allow_html=True)
+          </div>
+        </div>
+      </div>
+
+      <div className="max-w-7xl mx-auto px-6 mt-8 flex flex-col xl:flex-row gap-8">
+        
+        {/* Sidebar / Settings */}
+        <div className="w-full xl:w-1/4">
+          <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 sticky top-6">
+            <h2 className="text-lg font-black text-slate-800 mb-5 flex items-center gap-2 border-b border-slate-100 pb-4">
+              <Target className="w-5 h-5 text-indigo-500" />
+              فلاتر البحث المعمق
+            </h2>
             
-            st.markdown('</div>', unsafe_allow_html=True)
-            st.write("<br>", unsafe_allow_html=True)
+            <div className="mb-5">
+              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">الدولة المستهدفة</label>
+              <select 
+                className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-700 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 transition-all"
+                value={market}
+                onChange={(e) => setMarket(e.target.value)}
+              >
+                {markets.map(m => <option key={m} value={m}>{m}</option>)}
+              </select>
+            </div>
+            
+            <div className="mb-5">
+              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">المجال (Niche)</label>
+              <select 
+                className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-700 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 transition-all"
+                value={niche}
+                onChange={(e) => setNiche(e.target.value)}
+              >
+                {niches.map(n => <option key={n} value={n}>{n}</option>)}
+              </select>
+            </div>
+
+            {/* مؤشر اختيار عدد المنتجات */}
+            <div className="mb-6 bg-slate-50 p-4 rounded-xl border border-slate-200">
+              <label className="flex justify-between items-center text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">
+                <span>عدد المنتجات المطلوبة</span>
+                <span className="bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-md font-black">{productCount} منتجات</span>
+              </label>
+              <input 
+                type="range" 
+                min="1" 
+                max="10" 
+                value={productCount} 
+                onChange={(e) => setProductCount(parseInt(e.target.value))}
+                className="w-full accent-indigo-600 cursor-pointer"
+              />
+              <div className="flex justify-between text-[10px] text-slate-400 font-bold mt-1">
+                <span>1</span>
+                <span>10</span>
+              </div>
+            </div>
+
+            <div className="mb-6 border-t border-slate-100 pt-5">
+              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Pexels API (للصور الحقيقية)</label>
+              <input 
+                type="password" 
+                className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 transition-all"
+                placeholder="أدخل المفتاح هنا..."
+                value={pexelsKey}
+                onChange={(e) => setPexelsKey(e.target.value)}
+              />
+            </div>
+
+            <button 
+              onClick={scanMarket}
+              disabled={loading}
+              className={`w-full py-4 rounded-xl font-black text-base text-white shadow-md transition-all flex justify-center items-center gap-2 ${loading ? 'bg-slate-400 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-700 hover:-translate-y-0.5 hover:shadow-indigo-500/30'}`}
+            >
+              {loading ? (
+                <><Loader2 className="w-5 h-5 animate-spin" /> جاري استخراج {productCount} منتجات...</>
+              ) : (
+                <><Search className="w-5 h-5" /> استخراج المنتجات</>
+              )}
+            </button>
+          </div>
+        </div>
+
+        {/* Main Content */}
+        <div className="w-full xl:w-3/4">
+          
+          {/* Error Message */}
+          {error && (
+            <div className="bg-red-50 border-r-4 border-red-500 text-red-700 p-5 rounded-xl mb-6 flex items-start gap-3 font-bold shadow-sm">
+              <AlertTriangle className="w-6 h-6 flex-shrink-0" />
+              <p>{error}</p>
+            </div>
+          )}
+
+          {/* Results Area */}
+          {!loading && results.length === 0 && !error && (
+            <div className="bg-white rounded-2xl border border-slate-200 border-dashed p-16 text-center flex flex-col items-center justify-center">
+              <div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center mb-4">
+                <Globe className="w-10 h-10 text-slate-300" />
+              </div>
+              <h3 className="text-xl font-black text-slate-700 mb-2">الرادار جاهز للعمل</h3>
+              <p className="text-slate-500 max-w-md">
+                اختر السوق والمجال وعدد المنتجات من القائمة الجانبية واضغط على "استخراج المنتجات" لتبدأ الأداة بتحليل السوق.
+              </p>
+            </div>
+          )}
+
+          {results.length > 0 && (
+            <div>
+              <div className="flex items-center justify-between mb-6">
+                <h2 className="text-2xl font-black text-slate-800 flex items-center gap-2">
+                  <span className="relative flex h-3 w-3">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
+                  </span>
+                  المنتجات المكتشفة ({results.length})
+                </h2>
+              </div>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {results.map((product, idx) => (
+                  <ProductCard key={idx} product={product} pexelsKey={pexelsKey} />
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
